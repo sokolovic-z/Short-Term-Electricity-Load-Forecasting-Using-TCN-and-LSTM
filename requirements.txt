@@ -3,5 +3,7 @@ pandas
 numpy
 optuna
 scikit-learn
+torch
+pytorch-lightning
 matplotlib
 openpyxl
