@@ -1,0 +1,9 @@
+pandas
+numpy
+matplotlib
+openpyxl
+scikit-learn
+torch
+pytorch-lightning
+darts
+optuna
