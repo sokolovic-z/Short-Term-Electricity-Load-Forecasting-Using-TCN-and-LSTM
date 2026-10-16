@@ -23,37 +23,17 @@ warnings.filterwarnings("ignore")
 SEED = 42
 
 # make optimization results directory
-OUTPUT_DIR = Path("results/optimization")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUT_PATH = Path("results/optimization")
+OUTPUT_PATH.mkdir(parents=True, exist_ok=True)
 
 # optuna database path
-OPTUNA_DB_PATH = f'sqlite:///{OUTPUT_DIR}/optuna.db'
+OPTUNA_DB_FILEPATH = f'sqlite:///{OUTPUT_PATH}/optuna.db'
 
-
-# load processed data
-(
-train_scaled,
-val_scaled,
-test_scaled,
-covs_scaled,
-scaler_target,
-scaler_covs,
-) = utils.dataset_loader.load_data()
-
-# test portion
-train_scaled, val_scaled = train_scaled[:2000], train_scaled[2000:3000]
-
-
-
-# define objective function
+# define TCN objective function
 def objective_tcn(trial):
     
-    # fixed parameters
-    BATCH_SIZE = 64
-    N_EPOCHS = 1
-    
     # select forecast horizon and lookback window lengths
-    out_len = 96
+    out_len = args.forecast_horizon
     in_len = trial.suggest_int("in_len", 2 * out_len, 7 * out_len, step=out_len) 
 
     # other hps
@@ -63,11 +43,10 @@ def objective_tcn(trial):
     dropout = trial.suggest_float("dropout", 0.0, 0.5, step=0.1)
     lr = trial.suggest_float("lr", 1e-5, 1e-2, log=True)
     
-
     # early stopping callback
     early_stopper = EarlyStopping(monitor='val_loss', patience=4, min_delta=1e-4, mode="min", verbose=True)
 
-    # calendar features
+    # datetime/calendar features
     encoders = {
         "cyclic": {
             "past": [
@@ -89,8 +68,8 @@ def objective_tcn(trial):
         dropout=dropout,
         dilation_base=2,
         add_encoders=encoders,
-        n_epochs=N_EPOCHS,
-        batch_size=BATCH_SIZE,
+        n_epochs=args.n_epochs,
+        batch_size=args.batch_size,
         optimizer_kwargs={"lr": lr},
         pl_trainer_kwargs={"callbacks": [early_stopper]},
         model_name=f"tcn_model",
@@ -115,39 +94,117 @@ def objective_tcn(trial):
     return smape_val if np.isfinite(smape_val) else float('inf')
 
 
+# define LSTM objective function
 def objective_lstm(trial):
-    pass
+
+    # select forecast horizon and lookback window lengths
+    out_len = args.forecast_horizon
+    in_len = trial.suggest_int("in_len", 2 * out_len, 7 * out_len, step=out_len) 
+
+    # other hps
+    hidden_dim = trial.suggest_int("hidden_dim", 16, 128, step=16)
+    n_rnn_layers = trial.suggest_int("n_rnn_layers", 1, 3)
+    dropout = trial.suggest_float("dropout", 0.0, 0.5, step=0.1)
+    lr = trial.suggest_float("lr", 1e-5, 1e-2, log=True)
+
+    # early stopping callback
+    early_stopper = EarlyStopping(monitor='val_loss', patience=4, min_delta=1e-4, mode="min", verbose=True)
+
+    # datetime/calendar features
+    encoders = {
+        "cyclic": {
+            "future": [
+                "hour",
+                "weekday",
+                "month",
+            ]
+        }
+    }
+
+    # build LSTM model
+    model = BlockRNNModel(
+        input_chunk_length=in_len,
+        output_chunk_length=out_len,
+        model="LSTM",
+        hidden_dim=hidden_dim,
+        n_rnn_layers=n_rnn_layers,
+        dropout=dropout,
+        add_encoders=encoders,
+        n_epochs=args.n_epochs,
+        batch_size=args.batch_size,
+        optimizer_kwargs={"lr": lr},
+        pl_trainer_kwargs={"callbacks": [early_stopper]},
+        model_name=f"lstm_model",
+        random_state=SEED,
+        save_checkpoints=True,
+        force_reset=True,
+    )
+
+    # train the model
+    model.fit(
+        series=train_scaled,
+        future_covariates=covs_scaled,
+        val_series=val_scaled,
+        val_future_covariates=covs_scaled,
+        load_best=True,
+    )
+
+    # evaluate the model on the validation set, using sMAPE
+    preds = model.predict(series=train_scaled, n=len(val_scaled))
+    smape_val = smape(val_scaled, preds, n_jobs=-1)
+
+    return smape_val if np.isfinite(smape_val) else float('inf')
 
 
-def print_callback(study, trial):
-    pass
-    # print(f"Trial {trial.number} finished with value: {float(trial.value):.2f} and parameters: {trial.params}")
-    # print(f"Best trial so far: {study.best_trial.number} with value: {study.best_trial.value:.2f} and parameters: {study.best_trial.params}")
-
-# optimize hyperparameters by minimizing the sMAPE on the validation set
 if __name__ == "__main__":
-
-    # CLI arguments
+    
+    # CLI arguments setup
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", choices=["tcn", "lstm"], required=True, 
                         help='Choose which model to optimize')
+    parser.add_argument("--forecast-horizon", type=int, default=96, 
+                        help="Forecast horizon in time steps")
+    parser.add_argument("--n-trials", type=int, default=20,
+                        help='Number of trials to execute')
+    parser.add_argument("--n-epochs", type=int, default=20,
+                        help='Number of training epochs')
+    parser.add_argument("--batch-size", type=int, default=64,
+                        help='Number of samples per training batch')
     args = parser.parse_args()
 
+    # load processed data
+    (
+    train_scaled,
+    val_scaled,
+    test_scaled,
+    covs_scaled,
+    scaler_target,
+    scaler_covs,
+    ) = utils.dataset_loader.load_data()
+
+    # small test portion
+    train_scaled, val_scaled = train_scaled[:2000], train_scaled[2000:3000]
+
+    # create or load the Optuna study
     study_name = f"{args.model}_hp_optimization"
     study = optuna.create_study(
         direction="minimize", 
         study_name=study_name,
-        storage=OPTUNA_DB_PATH,
+        storage=OPTUNA_DB_FILEPATH,
         load_if_exists=True
     )
-
-    if args.model == "tcn":
-        study.optimize(objective_tcn, n_trials=20, n_jobs=1, callbacks=[print_callback])
-    elif args.model == "lstm":
-        study.optimize(objective_lstm, n_trials=20, n_jobs=1, callbacks=[print_callback])
     
-    # visualization
+    # run optimization 
+    match args.model:
+        case "tcn":
+            objective = objective_tcn
+        case "lstm":
+            objective = objective_lstm
+    study.optimize(objective, n_trials=args.n_trials, n_jobs=1)
+    
+    # visualization of optimization results
     history = optuna.visualization.plot_optimization_history(study)
     importance = optuna.visualization.plot_param_importances(study)
-    history.write_html(OUTPUT_DIR / f"{args.model}_optimization_history.html")
-    importance.write_html(OUTPUT_DIR / f"{args.model}_param_importances.html")
+    # save plots as interactive HTML files
+    history.write_html(OUTPUT_PATH / f"{args.model}_optimization_history.html")
+    importance.write_html(OUTPUT_PATH / f"{args.model}_param_importances.html")

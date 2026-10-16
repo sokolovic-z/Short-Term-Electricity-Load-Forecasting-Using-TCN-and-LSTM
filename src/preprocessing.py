@@ -1,4 +1,4 @@
-# import libraries
+# import packages
 import numpy as np
 import pickle
 

@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import numpy as np
 
-def plot_loss_curve(history, filepath):
+def plot_loss_history(history, filepath):
     plt.figure(figsize=(8, 5))
 
     plt.plot(history.train_loss, label="Train loss")

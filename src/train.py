@@ -14,7 +14,7 @@ from pytorch_lightning.callbacks import EarlyStopping
 # utility functions
 import utils.dataset_loader
 from utils.callbacks import LossHistory
-from utils.plotting import plot_loss_curve
+from utils.plotting import plot_loss_history
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -28,20 +28,6 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # optuna database path
 OPTUNA_DB_PATH = f'sqlite:///results/optimization/optuna.db'
-
-# load processed data
-(
-train_scaled,
-val_scaled,
-test_scaled,
-covs_scaled,
-scaler_target,
-scaler_covs,
-) = utils.dataset_loader.load_data()
-
-# test portion
-train_scaled, val_scaled = train_scaled[:2000], train_scaled[2000:3000]
-
 
 
 def train_tcn():
@@ -63,8 +49,8 @@ def train_tcn():
     # build model with best params
     model = TCNModel(
         output_chunk_length=out_len,
-        n_epochs=args.epochs, # from CLI
-        batch_size=args.batch_size, # from CLI
+        n_epochs=args.n_epochs, 
+        batch_size=args.batch_size,
         add_encoders=encoders,
         pl_trainer_kwargs={"callbacks": [LossHistory(), early_stopper]},
         model_name=f"tcn_model",
@@ -94,20 +80,38 @@ if __name__ == "__main__":
     # CLI arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", choices=["tcn", "lstm"], required=True)
-    parser.add_argument("--epochs", type=int, default=20)
-    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--n_epochs", type=int, default=20,
+                        help='Number of training epochs')
+    parser.add_argument("--batch_size", type=int, default=64,
+                        help='Number of samples per training batch')
     args = parser.parse_args()
 
+    # load processed data
+    (
+    train_scaled,
+    val_scaled,
+    test_scaled,
+    covs_scaled,
+    scaler_target,
+    scaler_covs,
+    ) = utils.dataset_loader.load_data()
+
+    # test portion
+    train_scaled, val_scaled = train_scaled[:2000], train_scaled[2000:3000]
+    
     # load study
     study_name = f"{args.model}_hp_optimization"
     study = optuna.load_study(study_name=study_name, storage=OPTUNA_DB_PATH)
 
-    # train
-    if args.model == "tcn": model = train_tcn()
-    elif args.model == "lstm": model = train_lstm()
+    # run training
+    match args.model:
+        case "tcn":
+            model = train_tcn()
+        case "lstm":
+            model = train_lstm()
 
-    # plot loss history
-    plot_loss_curve(
+    # visualization of loss history
+    plot_loss_history(
         history=model.pl_trainer_kwargs['callbacks'][0],
         filepath=OUTPUT_DIR / f"{args.model}_loss_curve.png"
     )
