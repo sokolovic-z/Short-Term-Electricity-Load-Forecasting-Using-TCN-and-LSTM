@@ -1,2 +1,6 @@
-run_colab.ipynb
 utils/__pycache__/
+darts_logs/
+results/
+env/
+venv/
+run_colab.ipynb
