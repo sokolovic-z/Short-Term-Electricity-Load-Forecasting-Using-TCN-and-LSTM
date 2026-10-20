@@ -16,25 +16,23 @@ from pytorch_lightning.callbacks import EarlyStopping
 # utility functions
 import utils.dataset_loader
 
-import warnings
-warnings.filterwarnings("ignore")
+import warnings; warnings.filterwarnings("ignore")
 
 # reproducibility
 SEED = 42
 
-# make optimization results directory
+# paths
 OUTPUT_PATH = Path("results/optimization")
 OUTPUT_PATH.mkdir(parents=True, exist_ok=True)
-
-# optuna database path
 OPTUNA_DB_FILEPATH = f'sqlite:///{OUTPUT_PATH}/optuna.db'
 
 # define TCN objective function
 def objective_tcn(trial):
     
     # select forecast horizon and lookback window lengths
-    out_len = args.forecast_horizon
-    in_len = trial.suggest_int("in_len", 2 * out_len, 7 * out_len, step=out_len) 
+    H = args.forecast_horizon
+    out_len = trial.suggest_int("out_len", H, H)
+    in_len = trial.suggest_int("in_len", 2 * H, 7 * H, step=H) 
 
     # other hps
     num_filters = trial.suggest_int("num_filters", 16, 128, step=16)
@@ -98,8 +96,9 @@ def objective_tcn(trial):
 def objective_lstm(trial):
 
     # select forecast horizon and lookback window lengths
-    out_len = args.forecast_horizon
-    in_len = trial.suggest_int("in_len", 2 * out_len, 7 * out_len, step=out_len) 
+    H = args.forecast_horizon
+    out_len = trial.suggest_int("out_len", H, H)
+    in_len = trial.suggest_int("in_len", 2 * H, 7 * H, step=H) 
 
     # other hps
     hidden_dim = trial.suggest_int("hidden_dim", 16, 128, step=16)
@@ -159,31 +158,22 @@ def objective_lstm(trial):
 if __name__ == "__main__":
     
     # CLI arguments setup
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Optimize hyperparameters with Optuna")
     parser.add_argument("--model", choices=["tcn", "lstm"], required=True, 
                         help='Choose which model to optimize')
-    parser.add_argument("--forecast-horizon", type=int, default=96, 
+    parser.add_argument("--forecast_horizon", type=int, default=96, 
                         help="Forecast horizon in time steps")
-    parser.add_argument("--n-trials", type=int, default=20,
+    parser.add_argument("--n_trials", type=int, default=20,
                         help='Number of trials to execute')
-    parser.add_argument("--n-epochs", type=int, default=20,
+    parser.add_argument("--n_epochs", type=int, default=20,
                         help='Number of training epochs')
-    parser.add_argument("--batch-size", type=int, default=64,
+    parser.add_argument("--batch_size", type=int, default=64,
                         help='Number of samples per training batch')
     args = parser.parse_args()
 
     # load processed data
-    (
-    train_scaled,
-    val_scaled,
-    test_scaled,
-    covs_scaled,
-    scaler_target,
-    scaler_covs,
-    ) = utils.dataset_loader.load_data()
-
-    # small test portion
-    train_scaled, val_scaled = train_scaled[:2000], train_scaled[2000:3000]
+    (train_scaled, val_scaled, test_scaled, covs_scaled,
+    scaler_target, scaler_covs) = utils.dataset_loader.load_data()
 
     # create or load the Optuna study
     study_name = f"{args.model}_hp_optimization"

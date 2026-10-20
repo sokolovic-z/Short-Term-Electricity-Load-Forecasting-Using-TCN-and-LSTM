@@ -8,7 +8,7 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 import optuna
 import argparse
 
-from darts.models import TCNModel
+from darts.models import TCNModel, BlockRNNModel
 from pytorch_lightning.callbacks import EarlyStopping
 
 # utility functions
@@ -16,27 +16,22 @@ import utils.dataset_loader
 from utils.callbacks import LossHistory
 from utils.plotting import plot_loss_history
 
-import warnings
-warnings.filterwarnings("ignore")
+import warnings; warnings.filterwarnings("ignore")
 
 # reproducibility
 SEED = 42
 
-# make training results directory
-OUTPUT_DIR = Path("results/training")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-# optuna database path
+# paths
+OUTPUT_PATH = Path("results/training")
+OUTPUT_PATH.mkdir(parents=True, exist_ok=True)
 OPTUNA_DB_PATH = f'sqlite:///results/optimization/optuna.db'
 
-
-def train_tcn():
+def train_tcn(args, study, train, val, covs):
     
-    # fixed params
-    out_len = 96
     # early stopping callback
     early_stopper = EarlyStopping(monitor='val_loss', patience=4, min_delta=1e-4, mode="min", verbose=True)
-    # calendar features
+    
+    # datetime/calendar features
     encoders = {
         "cyclic": {
             "past": [
@@ -46,9 +41,9 @@ def train_tcn():
             ]
         }
     }
+
     # build model with best params
     model = TCNModel(
-        output_chunk_length=out_len,
         n_epochs=args.n_epochs, 
         batch_size=args.batch_size,
         add_encoders=encoders,
@@ -62,23 +57,59 @@ def train_tcn():
 
     # train the model
     model.fit(
-        series=train_scaled,
-        past_covariates=covs_scaled,
-        val_series=val_scaled,
-        val_past_covariates=covs_scaled,
+        series=train,
+        past_covariates=covs,
+        val_series=val,
+        val_past_covariates=covs,
         load_best=True,
     )
 
     return model
 
 
+def train_lstm(args, study, train, val, covs):
+   
+    # early stopping callback
+    early_stopper = EarlyStopping(monitor='val_loss', patience=4, min_delta=1e-4, mode="min", verbose=True)
 
-def train_lstm():
-    pass
+    # datetime/calendar features
+    encoders = {
+        "cyclic": {
+            "future": [
+                "hour",
+                "weekday",
+                "month",
+            ]
+        }
+    }
+
+    # build LSTM model
+    model = BlockRNNModel(
+        n_epochs=args.n_epochs, 
+        batch_size=args.batch_size,
+        add_encoders=encoders,
+        pl_trainer_kwargs={"callbacks": [LossHistory(), early_stopper]},
+        model_name=f"lstm_model",
+        random_state=SEED,
+        save_checkpoints=True,
+        force_reset=True,
+        **study.best_params # inject optimized params
+    )
+
+    # train the model
+    model.fit(
+        series=train,
+        future_covariates=covs,
+        val_series=val,
+        val_future_covariates=covs,
+        load_best=True,
+    )
+
+    return model
 
 if __name__ == "__main__":
     # CLI arguments
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description='Train models (TCN or LSTM)')
     parser.add_argument("--model", choices=["tcn", "lstm"], required=True)
     parser.add_argument("--n_epochs", type=int, default=20,
                         help='Number of training epochs')
@@ -87,18 +118,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # load processed data
-    (
-    train_scaled,
-    val_scaled,
-    test_scaled,
-    covs_scaled,
-    scaler_target,
-    scaler_covs,
-    ) = utils.dataset_loader.load_data()
+    (train_scaled, val_scaled, test_scaled, covs_scaled,
+    scaler_target, scaler_covs) = utils.dataset_loader.load_data()
 
-    # test portion
-    train_scaled, val_scaled = train_scaled[:2000], train_scaled[2000:3000]
-    
     # load study
     study_name = f"{args.model}_hp_optimization"
     study = optuna.load_study(study_name=study_name, storage=OPTUNA_DB_PATH)
@@ -106,14 +128,14 @@ if __name__ == "__main__":
     # run training
     match args.model:
         case "tcn":
-            model = train_tcn()
+            model = train_tcn(args, study, train_scaled, val_scaled, covs_scaled)
         case "lstm":
-            model = train_lstm()
+            model = train_lstm(args, study, train_scaled, val_scaled, covs_scaled)
 
     # visualization of loss history
     plot_loss_history(
         history=model.pl_trainer_kwargs['callbacks'][0],
-        filepath=OUTPUT_DIR / f"{args.model}_loss_curve.png"
+        filepath=OUTPUT_PATH / f"{args.model}_loss_history.png"
     )
     
 
