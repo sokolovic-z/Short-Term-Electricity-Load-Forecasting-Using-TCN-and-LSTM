@@ -1,9 +1,9 @@
 import pickle
 
 
-def load_data(path="data/electricity_processed.pkl"):
+def load_data(dataset_path="data/electricity_processed.pkl"):
     # load processed data
-    with open(path, "rb") as f: 
+    with open(dataset_path, "rb") as f: 
         data = pickle.load(f)
     return (
         data["train_scaled"],
