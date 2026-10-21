@@ -158,7 +158,7 @@ def objective_lstm(trial, args, train, val, covs):
 if __name__ == "__main__":
     
     # CLI arguments setup
-    parser = argparse.ArgumentParser(description="Optimize hyperparameters with Optuna")
+    parser = argparse.ArgumentParser(description="Optimize model (TCN or LSTM) hyperparameters with Optuna")
     parser.add_argument("--model", choices=["tcn", "lstm"], required=True, 
                         help='Choose which model to optimize')
     parser.add_argument("--forecast_horizon", type=int, default=96, 
