@@ -27,7 +27,7 @@ OUTPUT_PATH.mkdir(parents=True, exist_ok=True)
 OPTUNA_DB_FILEPATH = f'sqlite:///{OUTPUT_PATH}/optuna.db'
 
 # define TCN objective function
-def objective_tcn(trial):
+def objective_tcn(trial, args, train, val, covs):
     
     # select forecast horizon and lookback window lengths
     H = args.forecast_horizon
@@ -78,22 +78,22 @@ def objective_tcn(trial):
 
     # train the model
     model.fit(
-        series=train_scaled,
-        past_covariates=covs_scaled,
-        val_series=val_scaled,
-        val_past_covariates=covs_scaled,
+        series=train,
+        past_covariates=covs,
+        val_series=val,
+        val_past_covariates=covs,
         load_best=True,
     )
 
     # evaluate the model on the validation set, using sMAPE
-    preds = model.predict(series=train_scaled, n=len(val_scaled))
-    smape_val = smape(val_scaled, preds, n_jobs=-1)
+    preds = model.predict(series=train, n=len(val))
+    smape_val = smape(val, preds, n_jobs=-1)
 
     return smape_val if np.isfinite(smape_val) else float('inf')
 
 
 # define LSTM objective function
-def objective_lstm(trial):
+def objective_lstm(trial, args, train, val, covs):
 
     # select forecast horizon and lookback window lengths
     H = args.forecast_horizon
@@ -141,16 +141,16 @@ def objective_lstm(trial):
 
     # train the model
     model.fit(
-        series=train_scaled,
-        future_covariates=covs_scaled,
-        val_series=val_scaled,
-        val_future_covariates=covs_scaled,
+        series=train,
+        future_covariates=covs,
+        val_series=val,
+        val_future_covariates=covs,
         load_best=True,
     )
 
     # evaluate the model on the validation set, using sMAPE
-    preds = model.predict(series=train_scaled, n=len(val_scaled))
-    smape_val = smape(val_scaled, preds, n_jobs=-1)
+    preds = model.predict(series=train, n=len(val))
+    smape_val = smape(val, preds, n_jobs=-1)
 
     return smape_val if np.isfinite(smape_val) else float('inf')
 
@@ -187,9 +187,9 @@ if __name__ == "__main__":
     # run optimization 
     match args.model:
         case "tcn":
-            objective = objective_tcn
+            objective = lambda trial: objective_tcn(trial, args, train_scaled, val_scaled, covs_scaled)
         case "lstm":
-            objective = objective_lstm
+            objective = lambda trial: objective_lstm(trial, args, train_scaled, val_scaled, covs_scaled)
     study.optimize(objective, n_trials=args.n_trials, n_jobs=1)
     
     # visualization of optimization results
