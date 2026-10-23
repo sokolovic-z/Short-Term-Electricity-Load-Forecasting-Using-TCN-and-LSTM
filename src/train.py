@@ -3,7 +3,8 @@ import sys
 from pathlib import Path
 
 # add the project root directory to Python's module search path
-sys.path.append(str(Path(__file__).resolve().parent.parent)) 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.append(str(PROJECT_ROOT)) 
 
 import optuna
 import argparse
