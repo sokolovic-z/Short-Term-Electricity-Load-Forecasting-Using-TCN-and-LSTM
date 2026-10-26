@@ -8,6 +8,7 @@ sys.path.append(str(PROJECT_ROOT))
 
 import optuna
 import argparse
+import yaml
 
 from darts.models import TCNModel, BlockRNNModel
 from pytorch_lightning.callbacks import EarlyStopping
@@ -25,9 +26,10 @@ SEED = 42
 # paths
 OUTPUT_PATH = Path("results/training")
 OUTPUT_PATH.mkdir(parents=True, exist_ok=True)
-OPTUNA_DB_PATH = f'sqlite:///results/optimization/optuna.db'
+CONFIG_FILEPATH = Path("src/configs/baseline.yaml")
+OPTUNA_DB_FILEPATH = f'sqlite:///results/optimization/optuna.db'
 
-def train_tcn(args, study, train, val, covs):
+def train_tcn(args, model_params, train, val, covs):
     
     # early stopping callback
     early_stopper = EarlyStopping(monitor='val_loss', patience=4, min_delta=1e-4, mode="min", verbose=True)
@@ -53,7 +55,7 @@ def train_tcn(args, study, train, val, covs):
         random_state=SEED,
         save_checkpoints=True,
         force_reset=True,
-        **study.best_params # inject optimized params
+        **model_params
     )
 
     # train the model
@@ -68,7 +70,7 @@ def train_tcn(args, study, train, val, covs):
     return model
 
 
-def train_lstm(args, study, train, val, covs):
+def train_lstm(args, model_params, train, val, covs):
    
     # early stopping callback
     early_stopper = EarlyStopping(monitor='val_loss', patience=4, min_delta=1e-4, mode="min", verbose=True)
@@ -94,7 +96,7 @@ def train_lstm(args, study, train, val, covs):
         random_state=SEED,
         save_checkpoints=True,
         force_reset=True,
-        **study.best_params # inject optimized params
+        **model_params
     )
 
     # train the model
@@ -116,22 +118,30 @@ if __name__ == "__main__":
                         help='Number of training epochs')
     parser.add_argument("--batch_size", type=int, default=64,
                         help='Number of samples per training batch')
+    parser.add_argument("--optimized", action="store_true",
+                        help='Use optimized model parameters')
     args = parser.parse_args()
 
     # load processed data
     (train_scaled, val_scaled, test_scaled, covs_scaled,
     scaler_target, scaler_covs) = utils.dataset_loader.load_data()
 
-    # load study
-    study_name = f"{args.model}_hp_optimization"
-    study = optuna.load_study(study_name=study_name, storage=OPTUNA_DB_PATH)
-
+    # load model params
+    if args.optimized:
+        study_name = f"{args.model}_hp_optimization"
+        study = optuna.load_study(study_name=study_name, storage=OPTUNA_DB_FILEPATH)
+        model_params = study.best_params.copy()
+    else: 
+        with open(CONFIG_FILEPATH, 'r', encoding='utf-8') as f:
+            cfg = yaml.safe_load(f) or {}
+        model_params = cfg.get(f"{args.model}", {})
+    
     # run training
     match args.model:
         case "tcn":
-            model = train_tcn(args, study, train_scaled, val_scaled, covs_scaled)
+            model = train_tcn(args, model_params, train_scaled, val_scaled, covs_scaled)
         case "lstm":
-            model = train_lstm(args, study, train_scaled, val_scaled, covs_scaled)
+            model = train_lstm(args, model_params, train_scaled, val_scaled, covs_scaled)
 
     # visualization of loss history
     plot_loss_history(

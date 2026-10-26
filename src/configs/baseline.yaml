@@ -1,0 +1,20 @@
+tcn:
+  input_chunk_length: 192
+  output_chunk_length: 96
+  kernel_size: 3
+  num_filters: 32
+  num_layers: None
+  dilation_base: 2
+  dropout: 0.1
+  optimizer_kwargs:
+    lr: 0.001
+
+lstm:
+  input_chunk_length: 192
+  output_chunk_length: 96
+  model: LSTM
+  hidden_dim: 64
+  n_rnn_layers: 2
+  dropout: 0.1
+  optimizer_kwargs:
+    lr: 0.001
